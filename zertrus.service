@@ -1,0 +1,26 @@
+[Unit]
+Description=ZerTrus Zero Trust Network Controller
+After=network.target nftables.service
+Wants=nftables.service
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/opt/zertrus
+ExecStart=/usr/bin/python3 -m src.main --config /etc/zertrus/config.json
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+# Security hardening
+ProtectSystem=strict
+ReadWritePaths=/var/lib/zertrus /var/log/zertrus /etc/zertrus
+ProtectHome=yes
+NoNewPrivileges=false
+# Need CAP_NET_ADMIN for NFQUEUE
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW
+
+[Install]
+WantedBy=multi-user.target

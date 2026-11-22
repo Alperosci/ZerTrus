@@ -1,0 +1,22 @@
+{
+    "nfqueue_num": 1,
+    "web_host": "0.0.0.0",
+    "web_port": 8443,
+    "web_secret_key": "CHANGE_ME_IN_PRODUCTION",
+    "db_path": "/var/lib/zertrus/zertrus.db",
+    "log_path": "/var/log/zertrus/zertrus.log",
+    "log_level": "INFO",
+    "default_action": "drop",
+    "dns_intercept": true,
+    "sni_extraction": true,
+    "request_timeout_seconds": 300,
+    "lan_interface": "eth0",
+    "wan_interface": "wlan0",
+    "lan_subnet": "192.168.50.0/24",
+    "pi_lan_ip": "192.168.50.1",
+    "auto_allow_established": true,
+    "auto_allow_dhcp": true,
+    "auto_allow_dns_to_pi": true,
+    "web_username": "admin",
+    "web_password": "zertrus"
+}

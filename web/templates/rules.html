@@ -1,0 +1,305 @@
+{% extends "base.html" %}
+{% block title %}Rules{% endblock %}
+
+{% block content %}
+<div class="d-flex flex-wrap justify-content-between align-items-center mb-3">
+    <h4 class="mb-0"><i class="bi bi-list-check"></i> Firewall Rules</h4>
+    <div class="d-flex gap-2 mt-2 mt-md-0">
+        <input type="text" class="form-control form-control-sm" id="rule-search"
+               placeholder="Search rules…" style="max-width:220px">
+        <button class="btn btn-sm btn-outline-secondary" id="btn-export" title="Export as JSON">
+            <i class="bi bi-download"></i> Export
+        </button>
+        <button class="btn btn-sm btn-accent" data-bs-toggle="modal" data-bs-target="#addRuleModal">
+            <i class="bi bi-plus-lg"></i> Add Rule
+        </button>
+    </div>
+</div>
+
+<!-- Empty state -->
+<div id="rules-empty" class="empty-state" {% if rules %}style="display:none"{% endif %}>
+    <i class="bi bi-shield-slash"></i>
+    <p class="mb-0">No rules configured yet. Add a rule or approve a pending request.</p>
+</div>
+
+<!-- Rules table -->
+<div class="card" id="rules-card" {% if not rules %}style="display:none"{% endif %}>
+    <div class="table-responsive">
+        <table class="table table-sm mb-0">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Source</th>
+                    <th>Destination</th>
+                    <th>Port</th>
+                    <th>Proto</th>
+                    <th>Domain</th>
+                    <th>Action</th>
+                    <th>Duration</th>
+                    <th class="hide-mobile">Hits</th>
+                    <th class="hide-mobile">Created</th>
+                    <th class="text-end">Actions</th>
+                </tr>
+            </thead>
+            <tbody id="rules-tbody">
+                {% for r in rules %}
+                <tr data-id="{{ r.id }}">
+                    <td class="text-muted">#{{ r.id }}</td>
+                    <td>{{ r.src_ip }}</td>
+                    <td>{{ r.dst_ip }}</td>
+                    <td>
+                        {% if r.dst_port == 443 %}<i class="bi bi-lock-fill port-icon port-secure"></i>{% endif %}
+                        {% if r.dst_port == 80 %}<i class="bi bi-exclamation-triangle-fill port-icon port-insecure"></i>{% endif %}
+                        {{ r.dst_port or '*' }}
+                    </td>
+                    <td><span class="badge bg-secondary">{{ r.protocol | upper }}</span></td>
+                    <td>{{ r.domain or '—' }}</td>
+                    <td>
+                        {% if r.action == 'allow' %}
+                            <span class="badge badge-allow">ALLOW</span>
+                        {% else %}
+                            <span class="badge badge-deny">DENY</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ r.duration }}</td>
+                    <td class="hide-mobile">{{ r.hit_count }}</td>
+                    <td class="hide-mobile text-muted">
+                        <span class="relative-time" data-ts="{{ r.created_at }}"></span>
+                    </td>
+                    <td class="text-end">
+                        <button class="btn btn-sm btn-outline-secondary btn-delete-rule"
+                                data-id="{{ r.id }}" title="Delete rule">
+                            <i class="bi bi-trash"></i>
+                        </button>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Add Rule Modal -->
+<div class="modal fade" id="addRuleModal" tabindex="-1" aria-labelledby="addRuleModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="addRuleModalLabel">
+                    <i class="bi bi-plus-circle"></i> Add Manual Rule
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        <label class="form-label">Source IP</label>
+                        <input type="text" class="form-control" id="add-src" value="*" placeholder="* for any">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Destination IP</label>
+                        <input type="text" class="form-control" id="add-dst" placeholder="e.g. 1.1.1.1">
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">Port</label>
+                        <input type="number" class="form-control" id="add-port" value="0" min="0" max="65535">
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">Protocol</label>
+                        <select class="form-select" id="add-proto">
+                            <option value="*">Any</option>
+                            <option value="tcp">TCP</option>
+                            <option value="udp">UDP</option>
+                        </select>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">Action</label>
+                        <select class="form-select" id="add-action">
+                            <option value="allow">Allow</option>
+                            <option value="deny">Deny</option>
+                        </select>
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label">Domain</label>
+                        <input type="text" class="form-control" id="add-domain" placeholder="e.g. example.com (optional)">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Duration</label>
+                        <select class="form-select" id="add-duration">
+                            <option value="permanent">Permanent</option>
+                            <option value="timed">Timed</option>
+                            <option value="session">Session</option>
+                        </select>
+                    </div>
+                    <div class="col-md-6" id="add-minutes-wrap" style="display:none">
+                        <label class="form-label">Minutes</label>
+                        <input type="number" class="form-control" id="add-minutes" value="60" min="1">
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label">Description</label>
+                        <input type="text" class="form-control" id="add-desc" placeholder="Optional description">
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-accent" id="confirm-add-rule">
+                    <i class="bi bi-plus-lg"></i> Add Rule
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+    const addRuleModal = bootstrap.Modal.getOrCreateInstance(document.getElementById('addRuleModal'));
+
+    // --- Relative timestamps ---
+    function refreshTimes() {
+        document.querySelectorAll('.relative-time').forEach(el => {
+            el.textContent = timeAgo(el.dataset.ts);
+        });
+    }
+    refreshTimes();
+    setInterval(refreshTimes, 15000);
+
+    // --- Show/hide timed minutes field ---
+    document.getElementById('add-duration').addEventListener('change', function() {
+        document.getElementById('add-minutes-wrap').style.display =
+            this.value === 'timed' ? '' : 'none';
+    });
+
+    // --- Add rule ---
+    document.getElementById('confirm-add-rule').addEventListener('click', () => {
+        const body = {
+            src_ip: document.getElementById('add-src').value || '*',
+            dst_ip: document.getElementById('add-dst').value || '*',
+            dst_port: parseInt(document.getElementById('add-port').value) || 0,
+            protocol: document.getElementById('add-proto').value,
+            domain: document.getElementById('add-domain').value,
+            action: document.getElementById('add-action').value,
+            duration: document.getElementById('add-duration').value,
+            description: document.getElementById('add-desc').value,
+        };
+        if (body.duration === 'timed') {
+            body.duration_minutes = parseInt(document.getElementById('add-minutes').value) || 60;
+        }
+
+        fetch('/api/rules', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(body)
+        })
+        .then(r => r.json())
+        .then(data => {
+            addRuleModal.hide();
+            if (data.success) {
+                showToast(`Rule #${data.rule_id} created`);
+                reloadRulesTable();
+            } else {
+                showToast(data.error || 'Failed', 'error');
+            }
+        })
+        .catch(() => {
+            addRuleModal.hide();
+            showToast('Network error', 'error');
+        });
+    });
+
+    // --- Delete rule ---
+    document.addEventListener('click', e => {
+        const btn = e.target.closest('.btn-delete-rule');
+        if (!btn) return;
+        const id = btn.dataset.id;
+        if (!confirm(`Delete rule #${id}?`)) return;
+
+        fetch(`/api/rules/${id}`, { method: 'DELETE' })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                showToast(`Rule #${id} deleted`);
+                btn.closest('tr').remove();
+                checkEmpty();
+            } else {
+                showToast(data.error || 'Failed', 'error');
+            }
+        })
+        .catch(() => showToast('Network error', 'error'));
+    });
+
+    function checkEmpty() {
+        const rows = document.querySelectorAll('#rules-tbody tr');
+        document.getElementById('rules-empty').style.display = rows.length ? 'none' : '';
+        document.getElementById('rules-card').style.display = rows.length ? '' : 'none';
+    }
+
+    // --- Reload table from API ---
+    function reloadRulesTable() {
+        fetch('/api/rules').then(r => r.json()).then(rules => {
+            const tbody = document.getElementById('rules-tbody');
+            if (!rules.length) {
+                tbody.innerHTML = '';
+                checkEmpty();
+                return;
+            }
+
+            tbody.innerHTML = rules.map(r => {
+                const portIcon = r.dst_port === 443
+                    ? '<i class="bi bi-lock-fill port-icon port-secure"></i>'
+                    : r.dst_port === 80
+                        ? '<i class="bi bi-exclamation-triangle-fill port-icon port-insecure"></i>'
+                        : '';
+                const actionBadge = r.action === 'allow'
+                    ? '<span class="badge badge-allow">ALLOW</span>'
+                    : '<span class="badge badge-deny">DENY</span>';
+                return `
+                <tr data-id="${r.id}">
+                    <td class="text-muted">#${r.id}</td>
+                    <td>${r.src_ip}</td>
+                    <td>${r.dst_ip}</td>
+                    <td>${portIcon}${r.dst_port || '*'}</td>
+                    <td><span class="badge bg-secondary">${(r.protocol || '*').toUpperCase()}</span></td>
+                    <td>${r.domain || '—'}</td>
+                    <td>${actionBadge}</td>
+                    <td>${r.duration}</td>
+                    <td class="hide-mobile">${r.hit_count}</td>
+                    <td class="hide-mobile text-muted">
+                        <span class="relative-time" data-ts="${r.created_at}">${timeAgo(r.created_at)}</span>
+                    </td>
+                    <td class="text-end">
+                        <button class="btn btn-sm btn-outline-secondary btn-delete-rule"
+                                data-id="${r.id}" title="Delete rule">
+                            <i class="bi bi-trash"></i>
+                        </button>
+                    </td>
+                </tr>`;
+            }).join('');
+            checkEmpty();
+            refreshTimes();
+        });
+    }
+
+    // --- Search / filter ---
+    document.getElementById('rule-search').addEventListener('input', function() {
+        const q = this.value.toLowerCase();
+        document.querySelectorAll('#rules-tbody tr').forEach(row => {
+            row.style.display = row.textContent.toLowerCase().includes(q) ? '' : 'none';
+        });
+    });
+
+    // --- Export as JSON ---
+    document.getElementById('btn-export').addEventListener('click', () => {
+        fetch('/api/rules').then(r => r.json()).then(rules => {
+            const blob = new Blob([JSON.stringify(rules, null, 2)], {type: 'application/json'});
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'zertrus-rules.json';
+            a.click();
+            URL.revokeObjectURL(url);
+            showToast(`Exported ${rules.length} rules`);
+        }).catch(() => showToast('Export failed', 'error'));
+    });
+</script>
+{% endblock %}

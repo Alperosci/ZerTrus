@@ -1,0 +1,307 @@
+{% extends "base.html" %}
+{% block title %}Pending Requests{% endblock %}
+
+{% block content %}
+<div class="d-flex flex-wrap justify-content-between align-items-center mb-3">
+    <h4 class="mb-0"><i class="bi bi-hourglass-split"></i> Pending Requests</h4>
+    <div class="d-flex gap-2 mt-2 mt-md-0">
+        <button class="btn btn-sm btn-approve" id="btn-approve-all">
+            <i class="bi bi-check-all"></i> Approve All
+        </button>
+        <button class="btn btn-sm btn-deny" id="btn-deny-all">
+            <i class="bi bi-x-lg"></i> Deny All
+        </button>
+    </div>
+</div>
+
+<!-- Empty state -->
+<div id="pending-empty" class="empty-state" {% if pending %}style="display:none"{% endif %}>
+    <i class="bi bi-shield-check"></i>
+    <p class="mb-0">No pending requests — your network is under control.</p>
+</div>
+
+<!-- Pending table -->
+<div class="card" id="pending-card" {% if not pending %}style="display:none"{% endif %}>
+    <div class="table-responsive">
+        <table class="table table-sm mb-0">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Source IP</th>
+                    <th>Destination</th>
+                    <th>Protocol</th>
+                    <th>Domain</th>
+                    <th class="hide-mobile">First Seen</th>
+                    <th>Count</th>
+                    <th class="text-end">Actions</th>
+                </tr>
+            </thead>
+            <tbody id="pending-tbody">
+                {% for p in pending %}
+                <tr data-id="{{ p.id }}">
+                    <td class="text-muted">#{{ p.id }}</td>
+                    <td>{{ p.src_ip }}</td>
+                    <td>{{ p.dst_ip }}:{{ p.dst_port }}</td>
+                    <td><span class="badge bg-secondary">{{ p.protocol | upper }}</span></td>
+                    <td>{{ p.domain or '—' }}</td>
+                    <td class="hide-mobile text-muted">
+                        <span class="relative-time" data-ts="{{ p.first_seen }}"></span>
+                    </td>
+                    <td>{{ p.packet_count }}</td>
+                    <td class="text-end text-nowrap">
+                        <button class="btn btn-sm btn-approve btn-open-approve" data-id="{{ p.id }}"
+                                data-src="{{ p.src_ip }}" data-dst="{{ p.dst_ip }}"
+                                data-port="{{ p.dst_port }}" data-proto="{{ p.protocol }}"
+                                data-domain="{{ p.domain }}">
+                            <i class="bi bi-check-lg"></i> Approve
+                        </button>
+                        <button class="btn btn-sm btn-deny btn-quick-deny" data-id="{{ p.id }}">
+                            <i class="bi bi-x-lg"></i> Deny
+                        </button>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Approve Modal -->
+<div class="modal fade" id="approveModal" tabindex="-1" aria-labelledby="approveModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="approveModalLabel">
+                    <i class="bi bi-check-circle"></i> Approve Request
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p class="text-muted mb-3" id="approve-summary"></p>
+
+                <div class="mb-3">
+                    <label class="form-label">Duration</label>
+                    <div class="form-check">
+                        <input class="form-check-input" type="radio" name="approveDuration"
+                               id="dur-permanent" value="permanent" checked>
+                        <label class="form-check-label" for="dur-permanent">
+                            Permanent
+                        </label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input" type="radio" name="approveDuration"
+                               id="dur-timed" value="timed">
+                        <label class="form-check-label" for="dur-timed">
+                            Timed
+                        </label>
+                    </div>
+                    <div class="ms-4 mt-1 mb-2" id="timed-options" style="display:none">
+                        <div class="input-group input-group-sm" style="max-width:200px">
+                            <input type="number" class="form-control" id="duration-minutes"
+                                   value="60" min="1" max="10080">
+                            <span class="input-group-text">minutes</span>
+                        </div>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input" type="radio" name="approveDuration"
+                               id="dur-session" value="session">
+                        <label class="form-check-label" for="dur-session">
+                            Session <small class="text-muted">(until restart)</small>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="mb-3">
+                    <label for="approve-desc" class="form-label">Description</label>
+                    <textarea class="form-control" id="approve-desc" rows="2"
+                              placeholder="Optional note about this rule…"></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-approve" id="confirm-approve">
+                    <i class="bi bi-check-lg"></i> Confirm Approve
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+    let currentApproveId = null;
+    const approveModal = new bootstrap.Modal(document.getElementById('approveModal'));
+
+    // --- Relative timestamps ---
+    function refreshTimes() {
+        document.querySelectorAll('.relative-time').forEach(el => {
+            el.textContent = timeAgo(el.dataset.ts);
+        });
+    }
+    refreshTimes();
+    setInterval(refreshTimes, 15000);
+
+    // --- Show/hide timed options ---
+    document.querySelectorAll('input[name="approveDuration"]').forEach(radio => {
+        radio.addEventListener('change', () => {
+            document.getElementById('timed-options').style.display =
+                document.getElementById('dur-timed').checked ? '' : 'none';
+        });
+    });
+
+    // --- Open approve modal ---
+    document.addEventListener('click', e => {
+        const btn = e.target.closest('.btn-open-approve');
+        if (!btn) return;
+        currentApproveId = btn.dataset.id;
+        const summary = `${btn.dataset.src} → ${btn.dataset.domain || btn.dataset.dst}:${btn.dataset.port} (${(btn.dataset.proto || 'tcp').toUpperCase()})`;
+        document.getElementById('approve-summary').textContent = summary;
+        document.getElementById('approve-desc').value = '';
+        document.getElementById('dur-permanent').checked = true;
+        document.getElementById('timed-options').style.display = 'none';
+        approveModal.show();
+    });
+
+    // --- Confirm approve ---
+    document.getElementById('confirm-approve').addEventListener('click', () => {
+        const duration = document.querySelector('input[name="approveDuration"]:checked').value;
+        const body = {
+            duration: duration,
+            description: document.getElementById('approve-desc').value
+        };
+        if (duration === 'timed') {
+            body.duration_minutes = parseInt(document.getElementById('duration-minutes').value) || 60;
+        }
+
+        fetch(`/api/pending/${currentApproveId}/approve`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(body)
+        })
+        .then(r => r.json())
+        .then(data => {
+            approveModal.hide();
+            if (data.success) {
+                showToast(`Request #${currentApproveId} approved → Rule #${data.rule_id}`);
+                removeRow(currentApproveId);
+            } else {
+                showToast(data.error || 'Failed to approve', 'error');
+            }
+        })
+        .catch(() => {
+            approveModal.hide();
+            showToast('Network error', 'error');
+        });
+    });
+
+    // --- Quick deny ---
+    document.addEventListener('click', e => {
+        const btn = e.target.closest('.btn-quick-deny');
+        if (!btn) return;
+        const id = btn.dataset.id;
+        fetch(`/api/pending/${id}/deny`, { method: 'POST' })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                showToast(`Request #${id} denied`);
+                removeRow(id);
+            } else {
+                showToast(data.error || 'Failed', 'error');
+            }
+        })
+        .catch(() => showToast('Network error', 'error'));
+    });
+
+    // --- Remove row + toggle empty state ---
+    function removeRow(id) {
+        const row = document.querySelector(`tr[data-id="${id}"]`);
+        if (row) row.remove();
+        checkEmpty();
+    }
+
+    function checkEmpty() {
+        const rows = document.querySelectorAll('#pending-tbody tr');
+        document.getElementById('pending-empty').style.display = rows.length ? 'none' : '';
+        document.getElementById('pending-card').style.display = rows.length ? '' : 'none';
+    }
+
+    // --- Approve All ---
+    document.getElementById('btn-approve-all').addEventListener('click', () => {
+        const rows = document.querySelectorAll('#pending-tbody tr');
+        if (!rows.length) return;
+        if (!confirm(`Approve all ${rows.length} pending request(s) with permanent duration?`)) return;
+
+        const ids = Array.from(rows).map(r => r.dataset.id);
+        Promise.all(ids.map(id =>
+            fetch(`/api/pending/${id}/approve`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({duration: 'permanent', description: 'Bulk approved'})
+            }).then(r => r.json())
+        )).then(results => {
+            const ok = results.filter(r => r.success).length;
+            showToast(`${ok} request(s) approved`);
+            ids.forEach(removeRow);
+        }).catch(() => showToast('Bulk approve failed', 'error'));
+    });
+
+    // --- Deny All ---
+    document.getElementById('btn-deny-all').addEventListener('click', () => {
+        const rows = document.querySelectorAll('#pending-tbody tr');
+        if (!rows.length) return;
+        if (!confirm(`Deny all ${rows.length} pending request(s)?`)) return;
+
+        const ids = Array.from(rows).map(r => r.dataset.id);
+        Promise.all(ids.map(id =>
+            fetch(`/api/pending/${id}/deny`, { method: 'POST' }).then(r => r.json())
+        )).then(results => {
+            const ok = results.filter(r => r.success).length;
+            showToast(`${ok} request(s) denied`);
+            ids.forEach(removeRow);
+        }).catch(() => showToast('Bulk deny failed', 'error'));
+    });
+
+    // --- SSE auto-refresh ---
+    const evtSource = new EventSource('/api/events');
+    evtSource.onmessage = function(event) {
+        const pending = JSON.parse(event.data);
+        updatePendingBadge(pending.length);
+
+        const tbody = document.getElementById('pending-tbody');
+
+        if (pending.length === 0) {
+            tbody.innerHTML = '';
+            checkEmpty();
+            return;
+        }
+
+        tbody.innerHTML = pending.map(p => `
+            <tr data-id="${p.id}">
+                <td class="text-muted">#${p.id}</td>
+                <td>${p.src_ip}</td>
+                <td>${formatDest(p.dst_ip, p.dst_port, p.domain)}</td>
+                <td><span class="badge bg-secondary">${(p.protocol || 'tcp').toUpperCase()}</span></td>
+                <td>${p.domain || '—'}</td>
+                <td class="hide-mobile text-muted">
+                    <span class="relative-time" data-ts="${p.first_seen}">${timeAgo(p.first_seen)}</span>
+                </td>
+                <td>${p.packet_count}</td>
+                <td class="text-end text-nowrap">
+                    <button class="btn btn-sm btn-approve btn-open-approve" data-id="${p.id}"
+                            data-src="${p.src_ip}" data-dst="${p.dst_ip}"
+                            data-port="${p.dst_port}" data-proto="${p.protocol}"
+                            data-domain="${p.domain || ''}">
+                        <i class="bi bi-check-lg"></i> Approve
+                    </button>
+                    <button class="btn btn-sm btn-deny btn-quick-deny" data-id="${p.id}">
+                        <i class="bi bi-x-lg"></i> Deny
+                    </button>
+                </td>
+            </tr>
+        `).join('');
+        checkEmpty();
+        refreshTimes();
+    };
+</script>
+{% endblock %}

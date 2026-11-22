@@ -1,0 +1,191 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+
+{% block content %}
+<!-- Stat Cards -->
+<div class="row g-3 mb-4">
+    <div class="col-6 col-md-3">
+        <div class="card h-100">
+            <div class="card-body text-center">
+                <div class="card-title"><i class="bi bi-list-check"></i> Total Rules</div>
+                <div class="stat-value stat-blue" id="stat-rules">{{ total_rules }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <a href="/pending" class="text-decoration-none">
+            <div class="card h-100 card-clickable">
+                <div class="card-body text-center">
+                    <div class="card-title"><i class="bi bi-hourglass-split"></i> Pending</div>
+                    <div class="stat-value stat-amber" id="stat-pending">{{ pending_count }}</div>
+                </div>
+            </div>
+        </a>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card h-100">
+            <div class="card-body text-center">
+                <div class="card-title"><i class="bi bi-check-circle"></i> Allowed</div>
+                <div class="stat-value stat-green" id="stat-allowed">{{ total_allowed }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card h-100">
+            <div class="card-body text-center">
+                <div class="card-title"><i class="bi bi-x-circle"></i> Denied</div>
+                <div class="stat-value stat-red" id="stat-denied">{{ total_denied }}</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Recent Pending Requests -->
+<div class="card">
+    <div class="card-body">
+        <h5 class="mb-3"><i class="bi bi-clock-history"></i> Recent Pending Requests</h5>
+
+        <div id="recent-empty" class="empty-state" {% if recent_pending %}style="display:none"{% endif %}>
+            <i class="bi bi-shield-check"></i>
+            <p>No pending requests — all clear!</p>
+        </div>
+
+        <div class="table-responsive" id="recent-table-wrap" {% if not recent_pending %}style="display:none"{% endif %}>
+            <table class="table table-sm mb-0">
+                <thead>
+                    <tr>
+                        <th>Source</th>
+                        <th>Destination</th>
+                        <th>Protocol</th>
+                        <th class="hide-mobile">Domain</th>
+                        <th>Seen</th>
+                        <th class="text-end">Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="recent-tbody">
+                    {% for p in recent_pending %}
+                    <tr data-id="{{ p.id }}">
+                        <td>{{ p.src_ip }}</td>
+                        <td>{{ p.dst_ip }}:{{ p.dst_port }}</td>
+                        <td><span class="badge bg-secondary">{{ p.protocol | upper }}</span></td>
+                        <td class="hide-mobile">{{ p.domain or '—' }}</td>
+                        <td class="text-muted"><span class="relative-time" data-ts="{{ p.last_seen }}"></span></td>
+                        <td class="text-end text-nowrap">
+                            <button class="btn btn-sm btn-approve quick-approve" data-id="{{ p.id }}"
+                                    title="Approve (permanent)">
+                                <i class="bi bi-check-lg"></i>
+                            </button>
+                            <button class="btn btn-sm btn-deny quick-deny" data-id="{{ p.id }}"
+                                    title="Deny">
+                                <i class="bi bi-x-lg"></i>
+                            </button>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+    // --- Relative timestamps ---
+    function refreshTimes() {
+        document.querySelectorAll('.relative-time').forEach(el => {
+            el.textContent = timeAgo(el.dataset.ts);
+        });
+    }
+    refreshTimes();
+    setInterval(refreshTimes, 15000);
+
+    // --- Quick approve (permanent) ---
+    document.addEventListener('click', e => {
+        const btn = e.target.closest('.quick-approve');
+        if (!btn) return;
+        const id = btn.dataset.id;
+        fetch(`/api/pending/${id}/approve`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({duration: 'permanent', description: 'Quick approved from dashboard'})
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                showToast(`Request #${id} approved`);
+                btn.closest('tr').remove();
+            } else {
+                showToast(data.error || 'Failed', 'error');
+            }
+        })
+        .catch(() => showToast('Network error', 'error'));
+    });
+
+    // --- Quick deny ---
+    document.addEventListener('click', e => {
+        const btn = e.target.closest('.quick-deny');
+        if (!btn) return;
+        const id = btn.dataset.id;
+        fetch(`/api/pending/${id}/deny`, { method: 'POST' })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                showToast(`Request #${id} denied`);
+                btn.closest('tr').remove();
+            } else {
+                showToast(data.error || 'Failed', 'error');
+            }
+        })
+        .catch(() => showToast('Network error', 'error'));
+    });
+
+    // --- SSE auto-refresh ---
+    const evtSource = new EventSource('/api/events');
+    evtSource.onmessage = function(event) {
+        const pending = JSON.parse(event.data);
+
+        // Update stats
+        fetch('/api/stats').then(r => r.json()).then(stats => {
+            document.getElementById('stat-rules').textContent = stats.total_rules;
+            document.getElementById('stat-pending').textContent = stats.pending_count;
+            document.getElementById('stat-allowed').textContent = stats.total_allowed;
+            document.getElementById('stat-denied').textContent = stats.total_denied;
+            updatePendingBadge(stats.pending_count);
+        });
+
+        // Rebuild recent table
+        const tbody = document.getElementById('recent-tbody');
+        const emptyEl = document.getElementById('recent-empty');
+        const tableWrap = document.getElementById('recent-table-wrap');
+
+        if (pending.length === 0) {
+            emptyEl.style.display = '';
+            tableWrap.style.display = 'none';
+            return;
+        }
+
+        emptyEl.style.display = 'none';
+        tableWrap.style.display = '';
+
+        const recent = pending.slice(0, 10);
+        tbody.innerHTML = recent.map(p => `
+            <tr data-id="${p.id}">
+                <td>${p.src_ip}</td>
+                <td>${formatDest(p.dst_ip, p.dst_port, p.domain)}</td>
+                <td><span class="badge bg-secondary">${(p.protocol || 'tcp').toUpperCase()}</span></td>
+                <td class="hide-mobile">${p.domain || '—'}</td>
+                <td class="text-muted"><span class="relative-time" data-ts="${p.last_seen}">${timeAgo(p.last_seen)}</span></td>
+                <td class="text-end text-nowrap">
+                    <button class="btn btn-sm btn-approve quick-approve" data-id="${p.id}" title="Approve">
+                        <i class="bi bi-check-lg"></i>
+                    </button>
+                    <button class="btn btn-sm btn-deny quick-deny" data-id="${p.id}" title="Deny">
+                        <i class="bi bi-x-lg"></i>
+                    </button>
+                </td>
+            </tr>
+        `).join('');
+    };
+</script>
+{% endblock %}
